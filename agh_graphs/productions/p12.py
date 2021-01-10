@@ -1,47 +1,31 @@
 from typing import List
 
 from networkx import Graph
+
 from agh_graphs.production import Production
-from agh_graphs.utils import get_neighbors_at, find_overlapping_vertices, join_overlapping_vertices, get_common_neighbors
+from agh_graphs.utils import get_neighbors_at, join_overlapping_vertices, get_common_neighbors
 
 
-class P6(Production):
+class P12(Production):
 
     def apply(self, graph: Graph, prod_input: List[str], orientation: int = 0, **kwargs) -> List[str]:
-        """
-        Apply 6th production on graph
-
-        `prod_input` is list of 6 interiors as follows: `[upper, upper, lower, lower, lower, lower]`,
-        where `upper` is vertex on upper layer and `lower` on lower layer. Order of vertices in one
-        layer is irrelevant.
-
-        `orientation` and `**kwargs` are ignored
-
-        Returns empty list, as no new vertices were added.
-        """
-
+        # Production based on P6
+        prod_input = self.__sort_prod_input(graph, prod_input)
         self.__check_prod_input(graph, prod_input)
 
         up_layer = graph.nodes()[prod_input[0]]['layer']
-        down_layer = graph.nodes()[prod_input[2]]['layer']
+        down_layer = graph.nodes()[prod_input[3]]['layer']
         v1_up, v2_up = get_common_neighbors(graph, prod_input[0], prod_input[1], up_layer)
         pos_v1 = graph.nodes()[v1_up]['position']
         pos_v2 = graph.nodes()[v2_up]['position']
 
-        x = (pos_v1[0] + pos_v2[0]) / 2
-        y = (pos_v1[1] + pos_v2[1]) / 2
-        pos_center = (x, y)
-
-        to_merge = [[], [], []]
+        to_merge = [[], []]
         for interior in prod_input[2:]:
             for v in get_neighbors_at(graph, interior, down_layer):
                 if graph.nodes()[v]['position'] == pos_v1:
                     to_merge[0].append(v)
                 elif graph.nodes()[v]['position'] == pos_v2:
                     to_merge[1].append(v)
-                elif graph.nodes()[v]['position'] == pos_center:
-                    if v not in to_merge[2]:
-                        to_merge[2].append(v)
 
         for v1, v2 in to_merge:
             join_overlapping_vertices(graph, v1, v2, down_layer)
@@ -49,27 +33,41 @@ class P6(Production):
         return []
 
     @staticmethod
+    def __sort_prod_input(graph: Graph, prod_input: List[str]):
+        layers = []
+        for interior in prod_input:
+            layers.append(graph.nodes()[interior]['layer'])
+        zipped_vertices = zip(layers, prod_input)
+        sorted_zip = sorted(zipped_vertices)
+        sorted_prod_input = [vertex for _, vertex in sorted_zip]
+        return sorted_prod_input
+
+    @staticmethod
     def __check_prod_input(graph: Graph, prod_input: List[str]):
 
         # Check number of vertices delivered
-        if len(set(prod_input)) != 6:
-            raise ValueError('Too few interiors in pord_input (6 required)')
+        if len(set(prod_input)) != 4:
+            raise ValueError('Wrong number of interiors')
 
         # Check layers
-        up_layer = graph.nodes()[prod_input[0]]['layer']
-        down_layer = graph.nodes()[prod_input[2]]['layer']
-        if any(graph.nodes()[interior]['layer'] != up_layer for interior in prod_input[:2]):
-            raise ValueError('First two interior are not in the same layer')
-        if any(graph.nodes()[interior]['layer'] != down_layer for interior in prod_input[2:]):
-            raise ValueError('Four last interiors are not in the same layer')
-        if up_layer + 1 != down_layer:
-            raise ValueError('Upper layer is not right above lower one')
+        layers = []
+        for interior in prod_input:
+            layers.append(graph.nodes()[interior]['layer'])
+        
+        if layers[0] + 1 != layers[3]:
+            raise ValueError('Interiors on wrong number of layers')
+        if layers[0] != layers[1]:
+            raise ValueError('Too few interiors in upper layer')
+        if layers[2] != layers[3]:
+            raise ValueError('Too few interiors in lower layer')
+        up_layer = layers[0]
+        down_layer = layers[3]
 
         # Check delivered vertices labels
         if any(graph.nodes()[interior]['label'] != 'i' for interior in prod_input[:2]):
-            raise ValueError('First two interior don not have "i" label')
+            raise ValueError('Wrong label of vertices in upper layer')
         if any(graph.nodes()[interior]['label'] != 'I' for interior in prod_input[2:]):
-            raise ValueError('Four last interior don not have "I" label')
+            raise ValueError('Wrong label of vertices in lower layer')
 
         # Check connections between delivered vertices
         neighbors_in_lower_layer = {prod_input[0]: set(), prod_input[1]: set()}
@@ -79,11 +77,7 @@ class P6(Production):
         for lower_interior in prod_input[2:]:
             if lower_interior not in neighbors_in_lower_layer[prod_input[0]]\
               and lower_interior not in neighbors_in_lower_layer[prod_input[1]]:
-                raise ValueError('Upper interiors not connected properly to lower ones')
-        if len(neighbors_in_lower_layer[prod_input[0]]) != 2:
-            raise ValueError('Upper interiors not connected properly to lower ones')
-        if len(neighbors_in_lower_layer[prod_input[1]]) != 2:
-            raise ValueError('Upper interiors not connected properly to lower ones')
+                raise ValueError('Upper interiors not connected to lower ones')
 
         # maps lower interiors to its parent in upper layer
         lower_to_upper = dict()
@@ -100,25 +94,19 @@ class P6(Production):
         v1_up, v2_up = upper_neighbors
         pos_v1 = graph.nodes()[v1_up]['position']
         pos_v2 = graph.nodes()[v2_up]['position']
-        x = (pos_v1[0] + pos_v2[0]) / 2
-        y = (pos_v1[1] + pos_v2[1]) / 2
-        pos_center = (x, y)
 
         # Check if they are connected
         if not graph.has_edge(v1_up, v2_up):
             raise ValueError('Upper vertices are not connected')
 
         # Prepare list of vertices in lower layer
-        pairs_of_lower = [set(), set(), set()]
+        pairs_of_lower = [set(), set()]
         for interior in prod_input[2:]:
             for v in get_neighbors_at(graph, interior, down_layer):
                 if graph.nodes()[v]['position'] == pos_v1:
                     pairs_of_lower[0].add((v, lower_to_upper[interior]))
                 elif graph.nodes()[v]['position'] == pos_v2:
                     pairs_of_lower[1].add((v, lower_to_upper[interior]))
-                elif graph.nodes()[v]['position'] == pos_center:
-                    if v not in pairs_of_lower[2]:
-                        pairs_of_lower[2].add((v, lower_to_upper[interior]))
 
         # Check if pair is indeed pair of vertices
         for pair in pairs_of_lower:
@@ -132,24 +120,7 @@ class P6(Production):
             for v in pair:
                 vertices_by_side[v[1]].append(v[0])
         # Now vertices_by_side should be dict where keys are id's of interiors in upper layer
-        # and values are lists of vertices in loser layer on belonging to this parent
-        # also last element on this list is center between two previous
-
-        # Check if vertices on one side are properly connected
-        for side in vertices_by_side:
-            v1, v2, v3 = vertices_by_side[side]
-            if not graph.has_edge(v1, v3):
-                raise ValueError('Connections between lower vertices are incorrect')
-            if not graph.has_edge(v2, v3):
-                raise ValueError('Connections between lower vertices are incorrect')
-
-        # Check if middle vertices are properly connected to two interiors each
-        for side in vertices_by_side:
-            v1, v2, v3 = vertices_by_side[side]     # v3 is vertex in the middle
-            lower_interiors = get_neighbors_at(graph, side, down_layer)
-            for interior in lower_interiors:
-                if interior not in graph.neighbors(v3):
-                    raise ValueError('Connections between lower vertices are incorrect')
+        # and values are lists of vertices in lower layer on belonging to this parent
 
         # Check if vertices on opposite sides are connected
         # (they obviously shouldn't be right?)
@@ -161,4 +132,3 @@ class P6(Production):
         all_vertices = vertices_by_side[prod_input[0]] + vertices_by_side[prod_input[1]] + [v1_up, v2_up]
         if any(graph.nodes()[v]['label'] != 'E' for v in all_vertices):
             raise ValueError('Not all vertices have label E')
-
