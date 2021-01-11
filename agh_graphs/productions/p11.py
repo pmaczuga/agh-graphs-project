@@ -5,13 +5,13 @@ from agh_graphs.production import Production
 from agh_graphs.utils import get_neighbors_at, find_overlapping_vertices, join_overlapping_vertices, get_common_neighbors
 
 
-class P6(Production):
+class P11(Production):
 
     def apply(self, graph: Graph, prod_input: List[str], orientation: int = 0, **kwargs) -> List[str]:
         """
-        Apply 6th production on graph
+        Apply 11th production on graph
 
-        `prod_input` is list of 6 interiors as follows: `[upper, upper, lower, lower, lower, lower]`,
+        `prod_input` is list of 5 interiors as follows: `[upper, upper, lower, lower, lower]`,
         where `upper` is vertex on upper layer and `lower` on lower layer. Order of vertices in one
         layer is irrelevant.
 
@@ -32,19 +32,17 @@ class P6(Production):
         y = (pos_v1[1] + pos_v2[1]) / 2
         pos_center = (x, y)
 
-        to_merge = [[], [], []]
+        to_merge = [[], []]
         for interior in prod_input[2:]:
             for v in get_neighbors_at(graph, interior, down_layer):
                 if graph.nodes()[v]['position'] == pos_v1:
                     to_merge[0].append(v)
                 elif graph.nodes()[v]['position'] == pos_v2:
                     to_merge[1].append(v)
-                elif graph.nodes()[v]['position'] == pos_center:
-                    if v not in to_merge[2]:
-                        to_merge[2].append(v)
 
-        for v1, v2 in to_merge:
-            join_overlapping_vertices(graph, v1, v2, down_layer)
+        for vs in to_merge:
+            if vs[0] != vs[1]:
+                join_overlapping_vertices(graph, vs[0], vs[1], down_layer)
 
         return []
 
@@ -52,7 +50,7 @@ class P6(Production):
     def __check_prod_input(graph: Graph, prod_input: List[str]):
 
         # Check number of vertices delivered
-        if len(set(prod_input)) != 6:
+        if len(set(prod_input)) != 5:
             raise ValueError('Too few interiors in pord_input (6 required)')
 
         # Check layers
@@ -61,7 +59,7 @@ class P6(Production):
         if any(graph.nodes()[interior]['layer'] != up_layer for interior in prod_input[:2]):
             raise ValueError('First two interior are not in the same layer')
         if any(graph.nodes()[interior]['layer'] != down_layer for interior in prod_input[2:]):
-            raise ValueError('Four last interiors are not in the same layer')
+            raise ValueError('Three last interiors are not in the same layer')
         if up_layer + 1 != down_layer:
             raise ValueError('Upper layer is not right above lower one')
 
@@ -90,7 +88,7 @@ class P6(Production):
         # Check common neighbors of upper interiors
         upper_neighbors = get_common_neighbors(graph, prod_input[0], prod_input[1], up_layer)
         if len(upper_neighbors) != 2:
-            raise ValueError('Upper interiors don not have 2 common neighbors')
+            raise ValueError('Upper interiors do not have 2 common neighbors')
 
         # Get those neighbors and their positions as well as center position between them
         v1_up, v2_up = upper_neighbors
@@ -105,56 +103,73 @@ class P6(Production):
             raise ValueError('Upper vertices are not connected')
 
         # Prepare list of vertices in lower layer
-        pairs_of_lower = [set(), set(), set()]
+        pairs_of_lower = [list(), list(), set()]
         for interior in prod_input[2:]:
             for v in get_neighbors_at(graph, interior, down_layer):
                 if graph.nodes()[v]['position'] == pos_v1:
-                    pairs_of_lower[0].add((v, lower_to_upper[interior]))
+                    pairs_of_lower[0].append((v, lower_to_upper[interior]))
                 elif graph.nodes()[v]['position'] == pos_v2:
-                    pairs_of_lower[1].add((v, lower_to_upper[interior]))
+                    pairs_of_lower[1].append((v, lower_to_upper[interior]))
                 elif graph.nodes()[v]['position'] == pos_center:
                     if v not in pairs_of_lower[2]:
                         pairs_of_lower[2].add((v, lower_to_upper[interior]))
 
-        # Check if pair is indeed pair of vertices
-        for pair in pairs_of_lower:
-            s = set(map(lambda x: x[0], pair))
-            if len(s) != 2:
+        # Check if sets have proper sizes
+        if len(pairs_of_lower[0]) != 2:
+            raise ValueError('Connections between lower vertices are incorrect')
+        if len(pairs_of_lower[1]) != 2:
+            raise ValueError('Connections between lower vertices are incorrect')
+        if len(pairs_of_lower[2]) != 1:
+            raise ValueError('Connections between lower vertices are incorrect')
+
+        # Check if middle vertex is connected to two proper interiors
+        middle = pairs_of_lower[2].pop()
+        middle_side = middle[1]
+        middle = middle[0]
+        for interior in get_neighbors_at(graph, middle_side, down_layer):
+            if not graph.has_edge(middle, interior):
+                raise ValueError('Middle vertex is not connected to two proper interiors')
+
+        # prepare vertexes to connect
+        # And check if there is one common vertex between two sides
+        single = None
+        multiple = []
+        # Confusing indexes pairs_of_lower[0][0][0] means:
+        # pairs_of_lower[position - either 0 or 1][vertex in list][0 for vertex id]
+        if pairs_of_lower[0][0][0] == pairs_of_lower[0][1][0]:
+            single = pairs_of_lower[0][0][0]
+            multiple = (pairs_of_lower[1][0][0], pairs_of_lower[1][1][0])
+            multiple_side = (pairs_of_lower[1][0][1], pairs_of_lower[1][1][1])
+        elif pairs_of_lower[1][0][0] == pairs_of_lower[1][1][0]:
+            single = pairs_of_lower[1][0][0]
+            multiple = (pairs_of_lower[0][0][0], pairs_of_lower[0][1][0])
+            multiple_side = (pairs_of_lower[0][0][1], pairs_of_lower[0][1][1])
+        else:
+            raise ValueError('There is no connection between two sides')
+
+        # Check if two vertices to merge are not the same
+        if multiple[0] == multiple[1]:
+            raise ValueError('Vertex to merge are one and the same')
+
+        # Check if vertices to merge are not connected
+        if graph.has_edge(multiple[0], multiple[1]):
+            raise ValueError('Vertex to merge are connected')
+
+        # Check if those vertices are properly connected
+        if not graph.has_edge(single, middle):
+            raise ValueError('Connections between lower vertices are incorrect')
+        if middle_side == multiple_side[0]:
+            if not graph.has_edge(single, multiple[1]):
                 raise ValueError('Connections between lower vertices are incorrect')
-
-        # separate vertices based on side it is on (vertices on one side are connected)
-        vertices_by_side = {prod_input[0]: list(), prod_input[1]: list()}
-        for pair in pairs_of_lower:
-            for v in pair:
-                vertices_by_side[v[1]].append(v[0])
-        # Now vertices_by_side should be dict where keys are id's of interiors in upper layer
-        # and values are lists of vertices in loser layer on belonging to this parent
-        # also last element on this list is center between two previous
-
-        # Check if vertices on one side are properly connected
-        for side in vertices_by_side:
-            v1, v2, v3 = vertices_by_side[side]
-            if not graph.has_edge(v1, v3):
+            if not graph.has_edge(middle, multiple[0]):
                 raise ValueError('Connections between lower vertices are incorrect')
-            if not graph.has_edge(v2, v3):
+        if middle_side == multiple_side[1]:
+            if not graph.has_edge(single, multiple[0]):
                 raise ValueError('Connections between lower vertices are incorrect')
-
-        # Check if middle vertices are properly connected to two interiors each
-        for side in vertices_by_side:
-            v1, v2, v3 = vertices_by_side[side]     # v3 is vertex in the middle
-            lower_interiors = get_neighbors_at(graph, side, down_layer)
-            for interior in lower_interiors:
-                if interior not in graph.neighbors(v3):
-                    raise ValueError('Connections between lower vertices are incorrect')
-
-        # Check if vertices on opposite sides are connected
-        # (they obviously shouldn't be right?)
-        for v in vertices_by_side[prod_input[0]]:
-            if any(graph.has_edge(v, v_other) for v_other in vertices_by_side[prod_input[1]]):
+            if not graph.has_edge(middle, multiple[1]):
                 raise ValueError('Connections between lower vertices are incorrect')
 
         # Check if labels are E
-        all_vertices = vertices_by_side[prod_input[0]] + vertices_by_side[prod_input[1]] + [v1_up, v2_up]
-        if any(graph.nodes()[v]['label'] != 'E' for v in all_vertices):
+        if any(graph.nodes()[v]['label'] != 'E' for v in [single, middle, multiple[0], multiple[1]]):
             raise ValueError('Not all vertices have label E')
 
